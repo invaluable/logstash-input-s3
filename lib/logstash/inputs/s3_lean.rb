@@ -115,7 +115,7 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
       @logger.debug("S3 input: Found key", :key => log.key)
 
       unless ignore_object?(log)
-        if sincedb.newer?(log.last_modified)
+        if @delete or sincedb.newer?(log.last_modified)
           objects << log
           @logger.debug("S3 input: Adding to objects[]", :key => log.key)
           if objects.length >= @batch_size
@@ -347,7 +347,10 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
       end
       completed = true
     rescue AWS::S3::Errors::InvalidObjectState
-      @logger.warn("Cannot download remote object when it's in Glacier", :error => $!, :key => remote_object.key)
+      @logger.warn("Cannot download remote object when it's in Glacier. Deleting it.", :error => $!, :key => remote_object.key)
+      if @delete
+        remote_object.delete()
+      end
     end
 
     return completed
