@@ -111,19 +111,23 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
   def list_and_process_new_files(queue)
     objects = []
 
-    @s3bucket.objects.with_prefix(@prefix).each do |log|
-      @logger.debug("S3 input: Found key", :key => log.key)
+    begin
+      @s3bucket.objects.with_prefix(@prefix).each(:limit => @batch_size * 3) do |log|
+        @logger.debug("S3 input: Found key", :key => log.key)
 
-      unless ignore_object?(log)
-        if @delete or sincedb.newer?(log.last_modified)
-          objects << log
-          @logger.debug("S3 input: Adding to objects[]", :key => log.key)
-          if objects.length >= @batch_size
-            process_s3_objects(queue, objects)
-            objects.clear
+        unless ignore_object?(log)
+          if @delete or sincedb.newer?(log.last_modified)
+            objects << log
+            @logger.debug("S3 input: Adding to objects[]", :key => log.key)
+            if objects.length >= @batch_size
+              process_s3_objects(queue, objects)
+              objects.clear
+            end
           end
         end
       end
+    rescue AWS::S3::Errors::NoSuchKey
+      @logger.error("Cannot iterate object.", :error => $!, :http => $!.http_request, :trace => $!.backtrace)
     end
 
     unless objects.empty?
@@ -317,11 +321,11 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
 
     if download_remote_file(object, filename)
       if process_local_log(queue, filename, object.key)
+        lastmod = object.last_modified
         backup_to_bucket(object, object.key)
         backup_to_dir(filename)
         delete_file_from_bucket(object)
         FileUtils.remove_entry_secure(filename, true)
-        lastmod = object.last_modified
         sincedb.write(lastmod)
       end
     else
@@ -347,7 +351,7 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
       end
       completed = true
     rescue AWS::S3::Errors::InvalidObjectState
-      @logger.warn("Cannot download remote object when it's in Glacier. Deleting it.", :error => $!, :key => remote_object.key)
+      @logger.error("Cannot download remote object when it's in Glacier. Deleting it.", :error => $!, :key => remote_object.key)
       if @delete
         remote_object.delete()
       end
