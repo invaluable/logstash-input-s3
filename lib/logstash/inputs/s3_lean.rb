@@ -112,7 +112,7 @@ class LogStash::Inputs::S3 < LogStash::Inputs::Base
     objects = []
 
     begin
-      @s3bucket.objects.with_prefix(@prefix).each(:limit => @batch_size * 3) do |log|
+      @s3bucket.objects.with_prefix(@prefix).each do |log|
         @logger.debug("S3 input: Found key", :key => log.key)
 
         unless ignore_object?(log)
